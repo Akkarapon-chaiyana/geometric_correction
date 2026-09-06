@@ -1,0 +1,1288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Geometric Correction Tool</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+       background: #1a1a2e; color: #e0e0e0; height: 100vh; display: flex;
+       flex-direction: column; overflow: hidden; }
+
+/* ── header ── */
+header {
+  background: #16213e; border-bottom: 1px solid #0f3460;
+  padding: 8px 16px; display: flex; align-items: center; gap: 10px; flex-shrink: 0;
+}
+header h1 { font-size: 15px; font-weight: 600; color: #4cc9f0; white-space: nowrap; }
+header .spacer { flex: 1; }
+
+button {
+  padding: 5px 14px; border: none; border-radius: 5px; cursor: pointer;
+  font-size: 12px; font-weight: 500; transition: all .15s;
+}
+button:disabled { opacity: .35; cursor: not-allowed; }
+#uploadBtn  { background: #4361ee; color: #fff; }
+#uploadBtn:hover:not(:disabled) { background: #3a0ca3; }
+#addGcpBtn  { background: #2d6a4f; color: #fff; }
+#addGcpBtn.active { background: #f72585; }
+#addGcpBtn:hover:not(:disabled):not(.active) { background: #1b4332; }
+#computeBtn { background: #f48c06; color: #fff; }
+#computeBtn:hover:not(:disabled) { background: #e85d04; }
+#previewWarpBtn { background: #4361ee; color: #fff; }
+#previewWarpBtn:hover:not(:disabled) { background: #3a0ca3; }
+#exportBtn  { background: #7209b7; color: #fff; }
+#exportBtn:hover:not(:disabled) { background: #560bad; }
+#clearBtn   { background: #555; color: #fff; }
+#clearBtn:hover { background: #333; }
+
+select {
+  padding: 5px 8px; border-radius: 5px; border: 1px solid #0f3460;
+  background: #0f3460; color: #e0e0e0; font-size: 12px;
+}
+label { font-size: 12px; color: #aaa; }
+
+/* ── main panels ── */
+.panels {
+  display: flex; flex: 1; overflow: hidden; gap: 3px;
+  background: #111;
+}
+.panel {
+  flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative;
+}
+.panel-label {
+  background: #16213e; border-bottom: 1px solid #0f3460;
+  padding: 5px 10px; font-size: 11px; color: #4cc9f0; font-weight: 600;
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+}
+.panel-label span { color: #888; font-weight: 400; font-size: 10px; }
+#mapLeft { flex: 1; }
+
+/* right panel canvas wrapper */
+.canvas-wrap {
+  flex: 1; overflow: hidden; position: relative; background: #0d0d1a;
+  cursor: crosshair;
+}
+#imgCanvas { display: block; }
+#dropOverlay {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 10px;
+  background: rgba(13,13,26,.92); pointer-events: none; transition: opacity .3s;
+}
+#dropOverlay.hidden { opacity: 0; }
+#dropOverlay .icon { font-size: 48px; }
+#dropOverlay p { color: #888; font-size: 13px; }
+
+/* ── status bar ── */
+#statusBar {
+  background: #0f3460; padding: 5px 14px; font-size: 12px; flex-shrink: 0;
+  display: flex; align-items: center; gap: 8px; min-height: 28px;
+}
+#statusDot { width: 8px; height: 8px; border-radius: 50%; background: #4cc9f0; flex-shrink: 0; }
+#statusDot.warn { background: #f48c06; }
+#statusDot.ok   { background: #52b788; }
+#statusDot.err  { background: #f72585; }
+
+/* ── bottom panel: GCP table + RMSE ── */
+.bottom { flex-shrink: 0; max-height: 230px; overflow: hidden;
+          display: flex; flex-direction: column; background: #16213e;
+          border-top: 2px solid #0f3460; }
+.bottom-header {
+  display: flex; align-items: center; gap: 16px; padding: 5px 12px;
+  border-bottom: 1px solid #0f3460; flex-shrink: 0;
+}
+.bottom-header h2 { font-size: 12px; font-weight: 600; color: #4cc9f0; }
+.rmse-box { display: flex; gap: 20px; margin-left: auto; font-size: 11px; }
+.rmse-item label { color: #888; margin-right: 4px; }
+.rmse-item .val { font-weight: 700; font-size: 13px; }
+.rmse-item .val.good { color: #52b788; }
+.rmse-item .val.mid  { color: #f48c06; }
+.rmse-item .val.bad  { color: #f72585; }
+
+.table-wrap { overflow-y: auto; flex: 1; }
+table { width: 100%; border-collapse: collapse; font-size: 11px; }
+thead th {
+  background: #0f3460; padding: 5px 8px; text-align: left;
+  position: sticky; top: 0; color: #4cc9f0; font-weight: 600;
+  white-space: nowrap;
+}
+tbody tr:nth-child(even) { background: rgba(255,255,255,.03); }
+tbody tr:hover           { background: rgba(76,201,240,.08); }
+tbody td { padding: 4px 8px; vertical-align: middle; white-space: nowrap; }
+.gcp-num { color: #888; }
+.res-val { font-weight: 600; }
+.res-good { color: #52b788; }
+.res-mid  { color: #f48c06; }
+.res-bad  { color: #f72585; }
+select.role-sel { font-size: 11px; padding: 2px 4px; }
+.del-btn { background: #f72585; color: #fff; padding: 2px 7px; font-size: 10px; border-radius: 3px; }
+.del-btn:hover { background: #b5179e; }
+
+/* ── pending pick highlights ── */
+#mapLeft.picking { cursor: crosshair; }
+#mapLeft.picking::after {
+  content: 'Click to set reference point';
+  position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+  background: rgba(247,37,133,.85); color: #fff; padding: 5px 14px;
+  border-radius: 20px; font-size: 12px; pointer-events: none; z-index: 1000;
+}
+.canvas-wrap.picking { cursor: crosshair; }
+
+/* Leaflet marker pulse */
+.gcp-marker {
+  width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid #fff; background: #f72585;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 9px; color: #fff; font-weight: 700;
+}
+.gcp-marker.validation { background: #f48c06; }
+
+/* ── right panel preview toolbar ── */
+.right-toolbar {
+  background: #16213e; padding: 4px 8px; flex-shrink: 0;
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  border-bottom: 1px solid #0f3460; font-size: 11px;
+}
+#previewWarpBtn { background: #4361ee; color: #fff; padding: 3px 10px; }
+#previewWarpBtn:hover:not(:disabled) { background: #3a0ca3; }
+#backToCanvasBtn { background: #2d6a4f; color: #fff; padding: 3px 10px; }
+#backToCanvasBtn:hover { background: #1b4332; }
+#toggleBasemapRightBtn { background: #0f3460; color: #4cc9f0; border: 1px solid #4cc9f0; padding: 3px 8px; }
+#toggleBasemapRightBtn:hover { background: #1a3a6e; }
+#linkMapsBtn { background: #0f3460; color: #888; border: 1px solid #555; padding: 3px 8px; }
+#linkMapsBtn.active { color: #4cc9f0; border-color: #4cc9f0; }
+#linkMapsBtn:hover { background: #1a3a6e; }
+.opacity-group { display: flex; align-items: center; gap: 4px; color: #888; }
+.opacity-group input[type=range] { width: 70px; accent-color: #4cc9f0; cursor: pointer; }
+#mapRight { flex: 1; display: none; }
+
+/* ── shapefile toolbar ── */
+.shp-row {
+  background: #16213e; padding: 4px 8px;
+  display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+  border-bottom: 1px solid #0f3460; font-size: 11px;
+}
+#loadShpBtn  { background: #2d6a4f; color: #fff; padding: 3px 10px; }
+#loadShpBtn:hover { background: #1b4332; }
+#clearShpBtn { background: #555; color: #fff; padding: 3px 10px; }
+#clearShpBtn:hover { background: #333; }
+#shpLabel    { color: #888; font-size: 10px; margin-left: 2px; overflow: hidden;
+               white-space: nowrap; text-overflow: ellipsis; max-width: 180px; }
+#toggleShpBtn { background: #0f3460; color: #4cc9f0; border: 1px solid #4cc9f0;
+                padding: 3px 8px; font-size: 10px; }
+#toggleShpBtn:hover { background: #1a3a6e; }
+
+/* shapefile popup */
+.shp-popup table { border-collapse: collapse; font-size: 11px; min-width: 160px; }
+.shp-popup td    { padding: 2px 6px; border-bottom: 1px solid #0f3460; }
+.shp-popup td:first-child { color: #4cc9f0; font-weight: 600; white-space: nowrap; }
+
+/* ── search bar ── */
+.search-row {
+  background: #0f3460; padding: 4px 8px;
+  display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+  border-bottom: 1px solid #16213e; position: relative;
+}
+#searchInput {
+  flex: 1; padding: 4px 8px; border-radius: 4px; border: 1px solid #4cc9f0;
+  background: #1a1a2e; color: #e0e0e0; font-size: 12px; outline: none;
+}
+#searchInput::placeholder { color: #555; }
+#searchBtn { background: #4cc9f0; color: #16213e; padding: 4px 10px; font-size: 11px; font-weight: 700; }
+#searchBtn:hover { background: #48cae4; }
+
+#searchDropdown {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 2000;
+  background: #16213e; border: 1px solid #4cc9f0; border-top: none;
+  max-height: 200px; overflow-y: auto; display: none;
+}
+.search-result {
+  padding: 6px 10px; font-size: 11px; cursor: pointer; border-bottom: 1px solid #0f3460;
+  color: #e0e0e0;
+}
+.search-result:hover { background: #0f3460; color: #4cc9f0; }
+.search-result small { color: #888; display: block; font-size: 10px; }
+
+/* ── AOI toolbar ── */
+.aoi-row {
+  background: #16213e; padding: 4px 8px;
+  display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+  border-bottom: 1px solid #0f3460; font-size: 11px;
+}
+#drawAoiBtn  { background: #0f3460; color: #4cc9f0; border: 1px solid #4cc9f0; padding: 3px 10px; }
+#drawAoiBtn.active { background: #f72585; color: #fff; border-color: #f72585; }
+#drawAoiBtn:hover:not(.active) { background: #1a3a6e; }
+#clearAoiBtn { background: #555; color: #fff; padding: 3px 10px; }
+#clearAoiBtn:hover { background: #333; }
+#aoiLabel    { color: #888; font-size: 10px; margin-left: 4px; }
+</style>
+</head>
+<body>
+
+<!-- ══ header ══════════════════════════════════════════════════════════════ -->
+<header>
+  <h1>Geometric Correction</h1>
+  <input type="file" id="fileInput" accept=".tif,.tiff" hidden>
+  <button id="uploadBtn" onclick="document.getElementById('fileInput').click()">Upload TIF</button>
+  <label>Transform:</label>
+  <select id="methodSelect">
+    <option value="affine">Affine (1st order)</option>
+    <option value="polynomial2">Polynomial 2nd order</option>
+    <option value="tps">Thin Plate Spline</option>
+  </select>
+  <button id="addGcpBtn" disabled>+ Add GCP</button>
+  <button id="computeBtn" disabled>Compute RMSE</button>
+  <button id="previewWarpBtn" disabled>Preview Correction</button>
+  <button id="exportBtn" disabled>Export COG</button>
+  <div class="spacer"></div>
+  <button id="clearBtn">Clear All GCPs</button>
+</header>
+
+<!-- ══ map panels ═══════════════════════════════════════════════════════════ -->
+<div class="panels">
+  <!-- left: satellite reference -->
+  <div class="panel" id="leftPanel">
+    <div class="panel-label">
+      Reference — Esri World Imagery
+      <span id="mapCoordLabel" style="margin-left:auto"></span>
+    </div>
+
+    <!-- search -->
+    <div class="search-row">
+      <input id="searchInput" type="text" placeholder="Search location (e.g. Bangkok, Thailand)…" autocomplete="off">
+      <button id="searchBtn">Search</button>
+      <div id="searchDropdown"></div>
+    </div>
+
+    <!-- shapefile toolbar -->
+    <div class="shp-row">
+      <input type="file" id="shpInput" accept=".zip,.shp" hidden>
+      <button id="loadShpBtn" onclick="document.getElementById('shpInput').click()">Load Shapefile</button>
+      <button id="toggleShpBtn" hidden>Hide</button>
+      <button id="clearShpBtn" hidden>Remove</button>
+      <span id="shpLabel">Upload .zip bundle or .shp file</span>
+    </div>
+
+    <!-- AOI toolbar -->
+    <div class="aoi-row">
+      <button id="drawAoiBtn">Draw AOI</button>
+      <button id="clearAoiBtn" hidden>Clear AOI</button>
+      <span id="aoiLabel">Click two corners on the map to define your area of interest</span>
+    </div>
+
+    <div id="mapLeft"></div>
+  </div>
+
+  <!-- divider -->
+  <div style="width:3px;background:#0f3460;flex-shrink:0"></div>
+
+  <!-- right: uploaded TIF / corrected preview -->
+  <div class="panel" id="rightPanel">
+    <div class="panel-label">
+      <span id="rightPanelTitle">Input TIF</span>
+      <span id="imgInfoLabel" style="margin-left:4px"></span>
+    </div>
+
+    <!-- preview toolbar (shown in map mode) -->
+    <div class="right-toolbar" id="rightToolbar" hidden>
+      <button id="toggleBasemapRightBtn">Hide Basemap</button>
+      <button id="linkMapsBtn">Link Maps</button>
+      <div class="opacity-group">
+        Opacity
+        <input type="range" id="opacitySlider" min="0" max="100" value="80">
+        <span id="opacityVal">80%</span>
+      </div>
+      <span style="color:#888;font-size:10px;margin-left:4px">Click map to add GCPs</span>
+    </div>
+
+    <!-- canvas mode (GCP picking) -->
+    <div class="canvas-wrap" id="canvasWrap">
+      <canvas id="imgCanvas"></canvas>
+      <div id="dropOverlay">
+        <div class="icon">🗺️</div>
+        <p>Upload a TIF file to begin</p>
+        <p style="font-size:11px;color:#555">Supports single-band and multi-band GeoTIFF</p>
+      </div>
+    </div>
+
+    <!-- map mode (corrected preview) -->
+    <div id="mapRight"></div>
+  </div>
+</div>
+
+<!-- ══ status bar ═══════════════════════════════════════════════════════════ -->
+<div id="statusBar">
+  <div id="statusDot"></div>
+  <span id="statusText">Ready — upload a TIF to begin.</span>
+</div>
+
+<!-- ══ GCP table ════════════════════════════════════════════════════════════ -->
+<div class="bottom">
+  <div class="bottom-header">
+    <h2>Ground Control Points</h2>
+    <span id="gcpCount" style="font-size:11px;color:#888">0 GCPs</span>
+    <div class="rmse-box">
+      <div class="rmse-item">
+        <label>Control RMSE</label>
+        <span class="val" id="ctrlRmse">—</span>
+        <span style="font-size:10px;color:#555"> m</span>
+      </div>
+      <div class="rmse-item">
+        <label>Validation RMSE</label>
+        <span class="val" id="valRmse">—</span>
+        <span style="font-size:10px;color:#555"> m</span>
+      </div>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Map Lon</th>
+          <th>Map Lat</th>
+          <th>Image X (px)</th>
+          <th>Image Y (px)</th>
+          <th>Residual (m)</th>
+          <th>Role</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="gcpBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════════════════════════
+//  STATE
+// ══════════════════════════════════════════════════════════════════════════════
+let aoiMode = false;   // declared here so map.on('click') guard can reference it
+
+const state = {
+  fileId: null,
+  origW: 0, origH: 0,
+  prevW: 0, prevH: 0,
+  imgScale: 1,        // preview/original ratio — multiply to go prev→orig
+  gcps: [],           // [{id, lon, lat, px, py, role, residual}]
+  nextId: 1,
+  mode: 'idle',       // idle | pick_map | pick_img
+  pendingLon: null, pendingLat: null,
+
+  // canvas viewer
+  cv: { scale: 1, ox: 0, oy: 0, img: null, dragging: false, lastX: 0, lastY: 0 }
+};
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  STATUS
+// ══════════════════════════════════════════════════════════════════════════════
+function setStatus(msg, type='info') {
+  document.getElementById('statusText').textContent = msg;
+  const dot = document.getElementById('statusDot');
+  dot.className = '';
+  if (type === 'ok')   dot.classList.add('ok');
+  if (type === 'warn') dot.classList.add('warn');
+  if (type === 'err')  dot.classList.add('err');
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  LEAFLET MAP (left panel)
+// ══════════════════════════════════════════════════════════════════════════════
+const map = L.map('mapLeft', { zoomControl: true }).setView([20, 0], 3);
+L.tileLayer(
+  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+  { attribution: 'Tiles &copy; Esri', maxZoom: 19 }
+).addTo(map);
+
+// Labels overlay
+L.tileLayer(
+  'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+  { attribution: '', maxZoom: 19, opacity: 0.7 }
+).addTo(map);
+
+// Show coords on hover
+map.on('mousemove', e => {
+  document.getElementById('mapCoordLabel').textContent =
+    `${e.latlng.lat.toFixed(6)}, ${e.latlng.lng.toFixed(6)}`;
+});
+
+const mapMarkers      = {};   // gcpId → L.Marker (left reference map)
+const rightMapMarkers = {};   // gcpId → L.Marker (right corrected preview map)
+
+function makeMapIcon(id, role) {
+  return L.divIcon({
+    className: '',
+    html: `<div class="gcp-marker ${role === 'validation' ? 'validation' : ''}">${id}</div>`,
+    iconSize: [18, 18], iconAnchor: [9, 9]
+  });
+}
+
+function _addMarkerTo(mapObj, store, gcp) {
+  if (!mapObj) return;
+  const m = L.marker([gcp.lat, gcp.lon], { icon: makeMapIcon(gcp.id, gcp.role) })
+    .addTo(mapObj)
+    .bindTooltip(`GCP ${gcp.id} | ${gcp.lon.toFixed(5)}, ${gcp.lat.toFixed(5)}`);
+  store[gcp.id] = m;
+}
+
+function addMapMarker(gcp) {
+  _addMarkerTo(map,      mapMarkers,      gcp);
+  _addMarkerTo(rightMap, rightMapMarkers, gcp);   // no-op if rightMap not yet init'd
+}
+
+function removeMapMarker(id) {
+  if (mapMarkers[id])      { map.removeLayer(mapMarkers[id]);           delete mapMarkers[id]; }
+  if (rightMapMarkers[id]) { rightMap && rightMap.removeLayer(rightMapMarkers[id]); delete rightMapMarkers[id]; }
+}
+
+function refreshMapMarker(gcp) {
+  if (mapMarkers[gcp.id])      mapMarkers[gcp.id].setIcon(makeMapIcon(gcp.id, gcp.role));
+  if (rightMapMarkers[gcp.id]) rightMapMarkers[gcp.id].setIcon(makeMapIcon(gcp.id, gcp.role));
+}
+
+function syncRightMapMarkers() {
+  // Called after rightMap is initialised — add markers for any existing GCPs
+  Object.keys(rightMapMarkers).forEach(id => {
+    rightMap.removeLayer(rightMapMarkers[id]);
+    delete rightMapMarkers[id];
+  });
+  state.gcps.forEach(g => _addMarkerTo(rightMap, rightMapMarkers, g));
+}
+
+map.on('click', e => {
+  if (aoiMode) return;   // AOI handler takes priority
+  if (state.mode !== 'pick_map') return;
+  state.pendingLon = e.latlng.lng;
+  state.pendingLat = e.latlng.lat;
+  state.mode = 'pick_img';
+  document.getElementById('mapLeft').classList.remove('picking');
+  document.getElementById('canvasWrap').classList.add('picking');
+  setStatus(`Step 2 of 2 — click the matching location on the TIF image`, 'warn');
+  if (!state.fileId) {
+    setStatus('No TIF loaded — upload a file first', 'err');
+    cancelPick();
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  CANVAS VIEWER (right panel)
+// ══════════════════════════════════════════════════════════════════════════════
+const canvas = document.getElementById('imgCanvas');
+const ctx    = canvas.getContext('2d');
+const wrap   = document.getElementById('canvasWrap');
+
+function resizeCanvas() {
+  canvas.width  = wrap.clientWidth;
+  canvas.height = wrap.clientHeight;
+  renderCanvas();
+}
+window.addEventListener('resize', resizeCanvas);
+
+function renderCanvas() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const cv = state.cv;
+  if (!cv.img) return;
+  ctx.save();
+  ctx.translate(cv.ox, cv.oy);
+  ctx.scale(cv.scale, cv.scale);
+  ctx.drawImage(cv.img, 0, 0);
+  ctx.restore();
+  drawCanvasMarkers();
+}
+
+function fitImage() {
+  const cv = state.cv;
+  if (!cv.img) return;
+  const sx = canvas.width  / cv.img.width;
+  const sy = canvas.height / cv.img.height;
+  cv.scale = Math.min(sx, sy) * 0.95;
+  cv.ox = (canvas.width  - cv.img.width  * cv.scale) / 2;
+  cv.oy = (canvas.height - cv.img.height * cv.scale) / 2;
+  renderCanvas();
+}
+
+// ── canvas pan / zoom ──
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  const cv = state.cv;
+  const rect = canvas.getBoundingClientRect();
+  const cx = e.clientX - rect.left;
+  const cy = e.clientY - rect.top;
+  const factor = e.deltaY < 0 ? 1.12 : 0.88;
+  const imgX = (cx - cv.ox) / cv.scale;
+  const imgY = (cy - cv.oy) / cv.scale;
+  cv.scale = Math.max(0.05, Math.min(100, cv.scale * factor));
+  cv.ox = cx - imgX * cv.scale;
+  cv.oy = cy - imgY * cv.scale;
+  renderCanvas();
+}, { passive: false });
+
+canvas.addEventListener('mousedown', e => {
+  if (e.button !== 0) return;
+  state.cv.dragging = true;
+  state.cv.lastX = e.clientX;
+  state.cv.lastY = e.clientY;
+  state._dragMoved = false;
+});
+
+window.addEventListener('mousemove', e => {
+  if (!state.cv.dragging) return;
+  const dx = e.clientX - state.cv.lastX;
+  const dy = e.clientY - state.cv.lastY;
+  if (Math.abs(dx) + Math.abs(dy) > 2) state._dragMoved = true;
+  state.cv.ox += dx;
+  state.cv.oy += dy;
+  state.cv.lastX = e.clientX;
+  state.cv.lastY = e.clientY;
+  renderCanvas();
+});
+
+window.addEventListener('mouseup', () => { state.cv.dragging = false; });
+
+canvas.addEventListener('click', e => {
+  if (state._dragMoved) { state._dragMoved = false; return; }
+  if (state.mode !== 'pick_img') return;
+  if (!state.fileId) { setStatus('Upload a TIF first', 'err'); return; }
+
+  const rect = canvas.getBoundingClientRect();
+  const cx = e.clientX - rect.left;
+  const cy = e.clientY - rect.top;
+  const cv = state.cv;
+
+  // coordinates in preview-image space
+  const prevX = (cx - cv.ox) / cv.scale;
+  const prevY = (cy - cv.oy) / cv.scale;
+
+  // clamp to image bounds
+  if (prevX < 0 || prevY < 0 || prevX > state.prevW || prevY > state.prevH) {
+    setStatus('Click inside the image bounds', 'err');
+    return;
+  }
+
+  // GCPs are stored in preview-pixel space; backend scales to original on export
+  const gcp = {
+    id:   state.nextId++,
+    lon:  state.pendingLon,
+    lat:  state.pendingLat,
+    px:   prevX,
+    py:   prevY,
+    role: state.gcps.length < 15 ? 'control' : 'validation',
+    residual: null
+  };
+
+  state.gcps.push(gcp);
+  addMapMarker(gcp);
+  endPick();
+  renderTable();
+  updateButtons();
+  setStatus(`GCP ${gcp.id} added — ${state.gcps.length} total. Add more or click Compute RMSE.`, 'ok');
+});
+
+// canvas marker drawing
+const canvasMarkerColors = { control: '#f72585', validation: '#f48c06' };
+function drawCanvasMarkers() {
+  const cv = state.cv;
+  state.gcps.forEach(g => {
+    const cx = g.px * cv.scale + cv.ox;
+    const cy = g.py * cv.scale + cv.oy;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, 6, 0, Math.PI * 2);
+    ctx.fillStyle = canvasMarkerColors[g.role] || '#f72585';
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 8px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(g.id, cx, cy);
+    ctx.restore();
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  PICK MODE
+// ══════════════════════════════════════════════════════════════════════════════
+function startPick() {
+  if (!state.fileId) { setStatus('Upload a TIF first', 'err'); return; }
+  state.mode = 'pick_map';
+  state.pendingLon = null;
+  state.pendingLat = null;
+  document.getElementById('mapLeft').classList.add('picking');
+  document.getElementById('addGcpBtn').classList.add('active');
+  document.getElementById('addGcpBtn').textContent = 'Cancel';
+  setStatus('Step 1 of 2 — click a reference point on the satellite map', 'warn');
+}
+
+function endPick() {
+  state.mode = 'idle';
+  document.getElementById('mapLeft').classList.remove('picking');
+  document.getElementById('canvasWrap').classList.remove('picking');
+  document.getElementById('addGcpBtn').classList.remove('active');
+  document.getElementById('addGcpBtn').textContent = '+ Add GCP';
+}
+
+function cancelPick() {
+  endPick();
+  setStatus('Pick cancelled.', 'info');
+}
+
+document.getElementById('addGcpBtn').addEventListener('click', () => {
+  if (state.mode !== 'idle') cancelPick();
+  else startPick();
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  FILE UPLOAD
+// ══════════════════════════════════════════════════════════════════════════════
+document.getElementById('fileInput').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  await uploadFile(file);
+  e.target.value = '';
+});
+
+async function uploadFile(file) {
+  setStatus(`Uploading ${file.name}…`, 'warn');
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const res = await fetch('/upload', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (data.error) { setStatus(data.error, 'err'); return; }
+
+    state.fileId   = data.id;
+    rightMapFirstLoad = true;   // new file → fit bounds on next preview
+    state.origW    = data.orig_w;
+    state.origH    = data.orig_h;
+    state.prevW    = data.prev_w;
+    state.prevH    = data.prev_h;
+    state.imgScale = data.img_scale;
+
+    document.getElementById('imgInfoLabel').textContent =
+      `${data.orig_w} × ${data.orig_h} px`;
+
+    const img = new Image();
+    img.onload = () => {
+      state.cv.img = img;
+      resizeCanvas();
+      fitImage();
+      document.getElementById('dropOverlay').classList.add('hidden');
+      setStatus(`Loaded ${file.name} (${data.orig_w}×${data.orig_h}). Add GCPs to begin.`, 'ok');
+    };
+    img.src = `/preview/${data.id}`;
+    updateButtons();
+  } catch (err) {
+    setStatus('Upload failed: ' + err.message, 'err');
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  GCP TABLE
+// ══════════════════════════════════════════════════════════════════════════════
+function renderTable() {
+  const tbody = document.getElementById('gcpBody');
+  tbody.innerHTML = '';
+  state.gcps.forEach(g => {
+    const tr = document.createElement('tr');
+    const resClass = g.residual === null ? '' :
+                     g.residual < 10 ? 'res-good' :
+                     g.residual < 50 ? 'res-mid'  : 'res-bad';
+    const resText  = g.residual !== null ? g.residual.toFixed(2) : '—';
+
+    // original-pixel coords for display
+    const dispX = (g.px / state.imgScale).toFixed(1);
+    const dispY = (g.py / state.imgScale).toFixed(1);
+
+    tr.innerHTML = `
+      <td class="gcp-num">${g.id}</td>
+      <td>${g.lon.toFixed(6)}</td>
+      <td>${g.lat.toFixed(6)}</td>
+      <td>${dispX}</td>
+      <td>${dispY}</td>
+      <td class="res-val ${resClass}">${resText}</td>
+      <td>
+        <select class="role-sel" data-id="${g.id}">
+          <option value="control"    ${g.role==='control'    ? 'selected':''}>Control</option>
+          <option value="validation" ${g.role==='validation' ? 'selected':''}>Validation</option>
+        </select>
+      </td>
+      <td><button class="del-btn" data-id="${g.id}">✕</button></td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  tbody.querySelectorAll('.role-sel').forEach(sel => {
+    sel.addEventListener('change', e => {
+      const id = +e.target.dataset.id;
+      const gcp = state.gcps.find(g => g.id === id);
+      if (gcp) { gcp.role = e.target.value; refreshMapMarker(gcp); renderCanvas(); }
+    });
+  });
+
+  tbody.querySelectorAll('.del-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      const id = +e.target.dataset.id;
+      state.gcps = state.gcps.filter(g => g.id !== id);
+      removeMapMarker(id);
+      renderTable();
+      renderCanvas();
+      updateButtons();
+      clearRmse();
+      setStatus(`GCP ${id} deleted.`, 'info');
+    });
+  });
+
+  document.getElementById('gcpCount').textContent = `${state.gcps.length} GCPs`;
+}
+
+function clearRmse() {
+  document.getElementById('ctrlRmse').textContent = '—';
+  document.getElementById('ctrlRmse').className = 'val';
+  document.getElementById('valRmse').textContent = '—';
+  document.getElementById('valRmse').className = 'val';
+  state.gcps.forEach(g => { g.residual = null; });
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  COMPUTE RMSE
+// ══════════════════════════════════════════════════════════════════════════════
+document.getElementById('computeBtn').addEventListener('click', async () => {
+  setStatus('Computing transform and RMSE…', 'warn');
+  const method = document.getElementById('methodSelect').value;
+  try {
+    const res = await fetch('/compute_rmse', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ gcps: state.gcps, method })
+    });
+    const data = await res.json();
+    if (data.error) { setStatus(data.error, 'err'); return; }
+
+    // update per-point residuals
+    const ctrl = state.gcps.filter(g => g.role === 'control');
+    const val  = state.gcps.filter(g => g.role === 'validation');
+    ctrl.forEach((g, i) => { g.residual = data.ctrl_residuals[i]; });
+    val.forEach( (g, i) => { g.residual = data.val_residuals[i]; });
+
+    const fmtRmse = (v, el) => {
+      if (v === null) { el.textContent = '—'; el.className = 'val'; return; }
+      el.textContent = v.toFixed(2);
+      el.className = 'val ' + (v < 10 ? 'good' : v < 50 ? 'mid' : 'bad');
+    };
+    fmtRmse(data.ctrl_rmse, document.getElementById('ctrlRmse'));
+    fmtRmse(data.val_rmse,  document.getElementById('valRmse'));
+
+    renderTable();
+    document.getElementById('exportBtn').disabled = false;
+    document.getElementById('previewWarpBtn').disabled = false;
+    setStatus(`RMSE — Control: ${data.ctrl_rmse.toFixed(2)} m` +
+              (data.val_rmse !== null ? ` | Validation: ${data.val_rmse.toFixed(2)} m` : ''), 'ok');
+  } catch (err) {
+    setStatus('Compute failed: ' + err.message, 'err');
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  EXPORT COG
+// ══════════════════════════════════════════════════════════════════════════════
+document.getElementById('exportBtn').addEventListener('click', async () => {
+  if (!state.fileId) { setStatus('No TIF loaded', 'err'); return; }
+  setStatus('Warping and building COG — this may take a moment…', 'warn');
+  const method = document.getElementById('methodSelect').value;
+
+  try {
+    const res = await fetch('/export', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        gcps: state.gcps,
+        method,
+        img_scale: state.imgScale
+      })
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      setStatus('Export failed: ' + err.error, 'err');
+      return;
+    }
+
+    const blob = await res.blob();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = 'corrected_cog.tif';
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    setStatus('COG exported successfully!', 'ok');
+  } catch (err) {
+    setStatus('Export failed: ' + err.message, 'err');
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  CLEAR
+// ══════════════════════════════════════════════════════════════════════════════
+document.getElementById('clearBtn').addEventListener('click', () => {
+  state.gcps.forEach(g => removeMapMarker(g.id));
+  state.gcps = [];
+  state.nextId = 1;
+  clearRmse();
+  renderTable();
+  renderCanvas();
+  updateButtons();
+  endPick();
+  setStatus('All GCPs cleared.', 'info');
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  BUTTON STATE
+// ══════════════════════════════════════════════════════════════════════════════
+function updateButtons() {
+  const hasFile = !!state.fileId;
+  const n = state.gcps.length;
+  const ctrl = state.gcps.filter(g => g.role === 'control').length;
+  const method = document.getElementById('methodSelect').value;
+  const minCtrl = method === 'polynomial2' ? 6 : 3;
+
+  document.getElementById('addGcpBtn').disabled  = !hasFile;
+  document.getElementById('computeBtn').disabled = ctrl < minCtrl;
+  // exportBtn enabled only after compute
+}
+
+document.getElementById('methodSelect').addEventListener('change', () => {
+  clearRmse();
+  renderTable();
+  updateButtons();
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  RIGHT PANEL — CORRECTED PREVIEW MAP
+// ══════════════════════════════════════════════════════════════════════════════
+let rightMap          = null;
+let rightBaselayer    = null;
+let warpOverlay       = null;
+let rightMode         = 'canvas';   // 'canvas' | 'map'
+let basemapVisible    = true;
+let mapsLinked        = false;
+let _syncing          = false;
+let rightMapFirstLoad = true;   // fit bounds only on first preview
+
+function initRightMap() {
+  if (rightMap) return;
+  rightMap = L.map('mapRight', { zoomControl: true, attributionControl: false });
+  rightBaselayer = L.tileLayer(
+    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    { maxZoom: 19 }
+  ).addTo(rightMap);
+  L.tileLayer(
+    'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+    { maxZoom: 19, opacity: 0.7 }
+  ).addTo(rightMap);
+
+  // GCP picking on the corrected preview map
+  rightMap.on('click', async e => {
+    if (state.mode !== 'pick_img') return;
+    const lon = e.latlng.lng;
+    const lat = e.latlng.lat;
+    const method = document.getElementById('methodSelect').value;
+    try {
+      const res = await fetch('/back_transform', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lon, lat, gcps: state.gcps, method })
+      });
+      const data = await res.json();
+      if (data.error) { setStatus('Back-transform failed: ' + data.error, 'err'); return; }
+      const gcp = {
+        id:   state.nextId++,
+        lon:  state.pendingLon,
+        lat:  state.pendingLat,
+        px:   data.px,
+        py:   data.py,
+        role: state.gcps.length < 15 ? 'control' : 'validation',
+        residual: null
+      };
+      state.gcps.push(gcp);
+      addMapMarker(gcp);
+      endPick();
+      renderTable();
+      updateButtons();
+      clearRmse();
+      setStatus(`GCP ${gcp.id} added from preview map — ${state.gcps.length} total. Recompute RMSE to update.`, 'ok');
+    } catch (err) {
+      setStatus('Back-transform error: ' + err.message, 'err');
+    }
+  });
+
+  // map sync
+  rightMap.on('move', () => {
+    if (_syncing || !mapsLinked) return;
+    _syncing = true;
+    map.setView(rightMap.getCenter(), rightMap.getZoom(), { animate: false });
+    _syncing = false;
+  });
+}
+
+map.on('move', () => {
+  if (_syncing || !mapsLinked || !rightMap) return;
+  _syncing = true;
+  rightMap.setView(map.getCenter(), map.getZoom(), { animate: false });
+  _syncing = false;
+});
+
+async function runPreviewWarp() {
+  if (!state.fileId) { setStatus('Upload a TIF first', 'err'); return; }
+  const method = document.getElementById('methodSelect').value;
+  setStatus('Warping preview — this may take a few seconds…', 'warn');
+  document.getElementById('previewWarpBtn').disabled = true;
+
+  try {
+    const res = await fetch('/preview_warp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ gcps: state.gcps, method })
+    });
+    if (!res.ok) {
+      let msg = `Server error ${res.status}`;
+      try { msg = (await res.json()).error || msg; } catch {}
+      setStatus('Preview failed: ' + msg, 'err');
+      return;
+    }
+    const data = await res.json();
+    if (data.error) { setStatus('Preview failed: ' + data.error, 'err'); return; }
+
+    switchToMapMode(data);
+    setStatus('Corrected preview ready — toggle basemap or adjust opacity to compare', 'ok');
+  } catch (err) {
+    setStatus('Preview error: ' + err.message, 'err');
+  } finally {
+    document.getElementById('previewWarpBtn').disabled = false;
+  }
+}
+
+function switchToMapMode(data) {
+  rightMode = 'map';
+  document.getElementById('canvasWrap').style.display = 'none';
+  document.getElementById('mapRight').style.display   = 'flex';
+  document.getElementById('rightToolbar').hidden      = false;
+  document.getElementById('rightPanelTitle').textContent = 'Corrected Preview';
+
+  initRightMap();
+  rightMap.invalidateSize();
+  syncRightMapMarkers();   // place markers for all existing GCPs
+
+  const bounds = [[data.south, data.west], [data.north, data.east]];
+
+  if (warpOverlay) { rightMap.removeLayer(warpOverlay); }
+  warpOverlay = L.imageOverlay(data.url + '?t=' + Date.now(), bounds, {
+    opacity: document.getElementById('opacitySlider').value / 100,
+    interactive: false
+  }).addTo(rightMap);
+
+  // Only zoom to the image on the very first preview — keep position on updates
+  if (rightMapFirstLoad) {
+    rightMap.fitBounds(bounds, { padding: [10, 10] });
+    rightMapFirstLoad = false;
+  }
+}
+
+
+document.getElementById('previewWarpBtn').addEventListener('click', runPreviewWarp);
+
+// basemap toggle
+document.getElementById('toggleBasemapRightBtn').addEventListener('click', () => {
+  if (!rightMap || !rightBaselayer) return;
+  if (basemapVisible) {
+    rightMap.removeLayer(rightBaselayer);
+    document.getElementById('toggleBasemapRightBtn').textContent = 'Show Basemap';
+  } else {
+    rightMap.addLayer(rightBaselayer);
+    document.getElementById('toggleBasemapRightBtn').textContent = 'Hide Basemap';
+  }
+  basemapVisible = !basemapVisible;
+});
+
+// link maps
+document.getElementById('linkMapsBtn').addEventListener('click', () => {
+  mapsLinked = !mapsLinked;
+  const btn = document.getElementById('linkMapsBtn');
+  btn.classList.toggle('active', mapsLinked);
+  btn.textContent = mapsLinked ? 'Unlink Maps' : 'Link Maps';
+  if (mapsLinked && rightMap) {
+    rightMap.setView(map.getCenter(), map.getZoom(), { animate: false });
+  }
+});
+
+// opacity slider
+document.getElementById('opacitySlider').addEventListener('input', e => {
+  const val = e.target.value;
+  document.getElementById('opacityVal').textContent = val + '%';
+  if (warpOverlay) warpOverlay.setOpacity(val / 100);
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  SHAPEFILE OVERLAY
+// ══════════════════════════════════════════════════════════════════════════════
+let shpLayer   = null;
+let shpVisible = true;
+
+document.getElementById('shpInput').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  e.target.value = '';
+  await loadShapefile(file);
+});
+
+async function loadShapefile(file) {
+  setStatus(`Reading shapefile: ${file.name}…`, 'warn');
+  document.getElementById('shpLabel').textContent = 'Loading…';
+
+  const fd = new FormData();
+  fd.append('file', file);
+
+  try {
+    const res = await fetch('/upload_shapefile', { method: 'POST', body: fd });
+    if (!res.ok) {
+      let msg = `Server error ${res.status}`;
+      try { msg = (await res.json()).error || msg; } catch { msg = await res.text() || msg; }
+      setStatus('Shapefile error: ' + msg, 'err');
+      document.getElementById('shpLabel').textContent = 'Error — see status bar';
+      return;
+    }
+    const data = await res.json();
+
+    if (data.error) {
+      setStatus('Shapefile error: ' + data.error, 'err');
+      document.getElementById('shpLabel').textContent = 'Error — see status bar';
+      return;
+    }
+
+    // remove previous layer
+    if (shpLayer) { map.removeLayer(shpLayer); shpLayer = null; }
+
+    shpLayer = L.geoJSON(data, {
+      style: {
+        color: '#f48c06', weight: 1.8, opacity: 0.9,
+        fillColor: '#f48c06', fillOpacity: 0.12
+      },
+      pointToLayer: (feature, latlng) =>
+        L.circleMarker(latlng, {
+          radius: 5, color: '#f48c06', weight: 1.5,
+          fillColor: '#f48c06', fillOpacity: 0.7
+        }),
+      onEachFeature: (feature, layer) => {
+        const props = feature.properties || {};
+        const keys  = Object.keys(props).slice(0, 12);
+        if (keys.length === 0) return;
+        const rows = keys.map(k =>
+          `<tr><td>${k}</td><td>${props[k] ?? '—'}</td></tr>`
+        ).join('');
+        layer.bindPopup(
+          `<div class="shp-popup"><table>${rows}</table></div>`,
+          { maxWidth: 280 }
+        );
+      }
+    }).addTo(map);
+
+    map.fitBounds(shpLayer.getBounds(), { padding: [10, 10], maxZoom: 16 });
+
+    shpVisible = true;
+    const shortName = file.name.replace(/\.(zip|shp)$/i, '');
+    document.getElementById('shpLabel').textContent =
+      `${shortName} · ${data.count} feature${data.count !== 1 ? 's' : ''}`;
+    document.getElementById('toggleShpBtn').hidden = false;
+    document.getElementById('toggleShpBtn').textContent = 'Hide';
+    document.getElementById('clearShpBtn').hidden = false;
+    setStatus(`Shapefile loaded: ${data.count} features from "${data.name}"`, 'ok');
+  } catch (err) {
+    setStatus('Shapefile load failed: ' + err.message, 'err');
+    document.getElementById('shpLabel').textContent = 'Load failed';
+  }
+}
+
+document.getElementById('toggleShpBtn').addEventListener('click', () => {
+  if (!shpLayer) return;
+  if (shpVisible) {
+    map.removeLayer(shpLayer);
+    document.getElementById('toggleShpBtn').textContent = 'Show';
+  } else {
+    map.addLayer(shpLayer);
+    document.getElementById('toggleShpBtn').textContent = 'Hide';
+  }
+  shpVisible = !shpVisible;
+});
+
+document.getElementById('clearShpBtn').addEventListener('click', () => {
+  if (shpLayer) { map.removeLayer(shpLayer); shpLayer = null; }
+  shpVisible = true;
+  document.getElementById('shpLabel').textContent = 'Upload .zip bundle or .shp file';
+  document.getElementById('toggleShpBtn').hidden = true;
+  document.getElementById('clearShpBtn').hidden = true;
+  setStatus('Shapefile layer removed.', 'info');
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  SEARCH (Nominatim — free, no API key)
+// ══════════════════════════════════════════════════════════════════════════════
+const searchInput    = document.getElementById('searchInput');
+const searchDropdown = document.getElementById('searchDropdown');
+let searchTimer = null;
+
+searchInput.addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  const q = searchInput.value.trim();
+  if (q.length < 3) { searchDropdown.style.display = 'none'; return; }
+  searchTimer = setTimeout(() => runSearch(q), 400);
+});
+
+searchInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') { clearTimeout(searchTimer); runSearch(searchInput.value.trim()); }
+  if (e.key === 'Escape') { searchDropdown.style.display = 'none'; }
+});
+
+document.getElementById('searchBtn').addEventListener('click', () => {
+  clearTimeout(searchTimer);
+  runSearch(searchInput.value.trim());
+});
+
+async function runSearch(q) {
+  if (!q) return;
+  searchDropdown.innerHTML = '<div class="search-result">Searching…</div>';
+  searchDropdown.style.display = 'block';
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=6&addressdetails=1`;
+    const res = await fetch(url, { headers: { 'Accept-Language': 'en-US,en' } });
+    const data = await res.json();
+    if (!data.length) {
+      searchDropdown.innerHTML = '<div class="search-result" style="color:#888">No results found</div>';
+      return;
+    }
+    searchDropdown.innerHTML = '';
+    data.forEach(r => {
+      const div = document.createElement('div');
+      div.className = 'search-result';
+      const display = r.display_name.length > 70 ? r.display_name.slice(0, 70) + '…' : r.display_name;
+      div.innerHTML = `${display}<small>${r.type} · ${parseFloat(r.lat).toFixed(4)}, ${parseFloat(r.lon).toFixed(4)}</small>`;
+      div.addEventListener('click', () => {
+        searchDropdown.style.display = 'none';
+        searchInput.value = r.display_name.split(',')[0];
+        const bb = r.boundingbox;  // [s, n, w, e]
+        if (bb) {
+          map.fitBounds([[+bb[0], +bb[2]], [+bb[1], +bb[3]]], { maxZoom: 15 });
+        } else {
+          map.setView([+r.lat, +r.lon], 13);
+        }
+        setStatus(`Navigated to: ${r.display_name.split(',')[0]}`, 'ok');
+      });
+      searchDropdown.appendChild(div);
+    });
+  } catch (err) {
+    searchDropdown.innerHTML = `<div class="search-result" style="color:#f72585">Error: ${err.message}</div>`;
+  }
+}
+
+// close dropdown when clicking outside
+document.addEventListener('click', e => {
+  if (!e.target.closest('.search-row')) searchDropdown.style.display = 'none';
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  AOI (Area of Interest) — click two corners to draw a rectangle
+// ══════════════════════════════════════════════════════════════════════════════
+let aoiRect    = null;   // L.Rectangle
+let aoiCorner1 = null;   // L.LatLng
+let aoiPreview = null;   // L.Rectangle (rubber-band while picking second corner)
+let aoiStep    = 0;      // 0=idle, 1=waiting second corner
+
+const drawAoiBtn  = document.getElementById('drawAoiBtn');
+const clearAoiBtn = document.getElementById('clearAoiBtn');
+const aoiLabel    = document.getElementById('aoiLabel');
+
+drawAoiBtn.addEventListener('click', () => {
+  if (aoiMode) {
+    cancelAoi();
+  } else {
+    startAoi();
+  }
+});
+
+clearAoiBtn.addEventListener('click', clearAoi);
+
+function startAoi() {
+  if (state.mode !== 'idle') cancelPick();
+  aoiMode = true;
+  aoiStep = 1;
+  drawAoiBtn.classList.add('active');
+  drawAoiBtn.textContent = 'Cancel AOI';
+  aoiLabel.textContent = 'Click first corner on the map…';
+  map.getContainer().style.cursor = 'crosshair';
+}
+
+function cancelAoi() {
+  aoiMode = false;
+  aoiStep = 0;
+  aoiCorner1 = null;
+  if (aoiPreview) { map.removeLayer(aoiPreview); aoiPreview = null; }
+  drawAoiBtn.classList.remove('active');
+  drawAoiBtn.textContent = 'Draw AOI';
+  aoiLabel.textContent = 'Click two corners on the map to define your area of interest';
+  map.getContainer().style.cursor = '';
+}
+
+function clearAoi() {
+  if (aoiRect) { map.removeLayer(aoiRect); aoiRect = null; }
+  clearAoiBtn.hidden = true;
+  aoiLabel.textContent = 'Click two corners on the map to define your area of interest';
+  setStatus('AOI cleared.', 'info');
+}
+
+// intercept map clicks for AOI before GCP picking
+map.on('click', e => {
+  if (!aoiMode) return;
+  if (aoiStep === 1) {
+    aoiCorner1 = e.latlng;
+    aoiStep = 2;
+    aoiLabel.textContent = 'Click opposite corner to complete the AOI…';
+    // start rubber-band preview
+    aoiPreview = L.rectangle([aoiCorner1, aoiCorner1], {
+      color: '#4cc9f0', weight: 1.5, dashArray: '6 4',
+      fillColor: '#4cc9f0', fillOpacity: 0.08, interactive: false
+    }).addTo(map);
+  } else if (aoiStep === 2) {
+    const bounds = L.latLngBounds(aoiCorner1, e.latlng);
+    if (aoiPreview) { map.removeLayer(aoiPreview); aoiPreview = null; }
+    if (aoiRect)    { map.removeLayer(aoiRect); }
+    aoiRect = L.rectangle(bounds, {
+      color: '#4cc9f0', weight: 2, dashArray: '8 4',
+      fillColor: '#4cc9f0', fillOpacity: 0.05, interactive: false
+    }).addTo(map);
+    map.fitBounds(bounds, { padding: [20, 20] });
+    clearAoiBtn.hidden = false;
+    cancelAoi();
+    const sw = bounds.getSouthWest(), ne = bounds.getNorthEast();
+    aoiLabel.textContent = `AOI: ${sw.lat.toFixed(4)},${sw.lng.toFixed(4)} → ${ne.lat.toFixed(4)},${ne.lng.toFixed(4)}`;
+    setStatus(`AOI set — map zoomed to selected area.`, 'ok');
+  }
+});
+
+// rubber-band rectangle tracks mouse while picking second corner
+map.on('mousemove', e => {
+  if (aoiMode && aoiStep === 2 && aoiPreview && aoiCorner1) {
+    aoiPreview.setBounds(L.latLngBounds(aoiCorner1, e.latlng));
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  INIT
+// ══════════════════════════════════════════════════════════════════════════════
+resizeCanvas();
+</script>
+</body>
+</html>
